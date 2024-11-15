@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Explorer with Search</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 0;
+            background-color: #f0f0f0;
+        }
+
+        h2 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        input[type="file"], input[type="text"] {
+            margin-bottom: 10px;
+        }
+
+        #explorer-nav {
+            display: flex;
+            align-items: center;
+            background-color: #fff;
+            padding: 5px 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .nav-button {
+            font-size: 18px;
+            margin-right: 10px;
+            color: #007bff;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .nav-button.disabled {
+            color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .nav-button:hover:not(.disabled) {
+            text-decoration: underline;
+        }
+
+        #path-box {
+            flex: 1;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 5px 10px;
+            margin-right: 10px;
+        }
+
+        #search-box {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 5px 10px;
+            width: 200px;
+        }
+
+        #file-list {
+            list-style-type: none;
+            padding-left: 0;
+            margin-top: 10px;
+        }
+
+        .folder, .file {
+            display: flex;
+            align-items: center;
+            padding: 5px 10px;
+            background-color: #ffffff;
+            border-radius: 4px;
+            margin: 2px 0;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .folder:hover, .file:hover {
+            background-color: #e0e0e0;
+        }
+
+        .folder-icon, .file-icon {
+            margin-right: 10px;
+        }
+
+        .folder {
+            font-weight: bold;
+        }
+
+        .file {
+            font-size: 14px;
+            padding-left: 30px;
+        }
+
+        .folder > .folder-title::before {
+            content: '\f07b'; /* FontAwesome folder icon */
+            font-family: 'Font Awesome 5 Free';
+            font-weight: 900;
+            margin-right: 10px;
+        }
+
+        .file > .file-title::before {
+            content: '\f15b'; /* FontAwesome file icon */
+            font-family: 'Font Awesome 5 Free';
+            font-weight: 900;
+            margin-right: 10px;
+        }
+
+        /* Settings Panel */
+        #settings-panel {
+            display: none;
+            background-color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h2>File Explorer with Search</h2>
+    
+    <!-- Navigation bar -->
+    <div id="explorer-nav">
+        <span id="back-button" class="nav-button disabled" onclick="goBack()">←</span>
+        <span id="forward-button" class="nav-button disabled" onclick="goForward()">→</span>
+        <input type="text" id="path-box" readonly>
+        <span class="nav-button" onclick="refreshView()">⟲</span>
+        <input type="text" id="search-box" placeholder="Search" oninput="searchDirectory()">
+    </div>
+
+    <!-- File list display -->
+    <ul id="file-list"></ul> 
+
+    <!-- Settings Panel for UID and File selection -->
+    <div id="settings-panel">
+        <input type="text" id="uid-box" placeholder="Enter UID" oninput="updatePathFromUID()">
+        <input type="file" id="file-input" webkitdirectory multiple onchange="selectFolder('file-input')">
+    </div>
+
+    <script>
+        let directoryStructure = {};
+        let currentPath = ''; // Tracks the current folder path
+        let history = []; // Stores navigation history
+        let historyIndex = -1; // Tracks the current position in history
+        let uidPath = ''; // Holds the UID path prefix
+
+        // Save settings to cookies
+        function saveSetting(name, value) {
+            document.cookie = `${name}=${value};path=/;max-age=31536000`; // Save for 1 year
+        }
+
+        // Retrieve settings from cookies
+        function readSetting(name) {
+            const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+            return match ? match[2] : null;
+        }
+
+        function selectFolder(uploadId) {
+            const inputElement = document.getElementById(uploadId);
+            const files = inputElement.files;
+            const fileList = document.getElementById('file-list');
+            
+            fileList.innerHTML = ''; // Clear previous content
+            directoryStructure = {}; // Reset the directory structure
+            history = [];
+            historyIndex = -1;
+
+            if (files.length === 0) {
+                alert('No files or folders selected.');
+                return;
+            }
+
+            // Organize files into a hierarchical directory structure
+            Array.from(files).forEach(file => {
+                const relativePath = file.webkitRelativePath;
+                const parts = relativePath.split('/');
+                const fileName = parts.pop(); // Get the file name
+                let currentLevel = directoryStructure;
+
+                // Build the nested directory structure
+                parts.forEach(part => {
+                    if (!currentLevel[part]) {
+                        currentLevel[part] = {};
+                    }
+                    currentLevel = currentLevel[part];
+                });
+
+                // Add the file to the current directory
+                currentLevel[fileName] = null; // Null indicates it's a file
+            });
+
+            currentPath = ''; // Start at the root
+            addToHistory('');
+            renderDirectory('');
+        }
+
+        function renderDirectory(path) {
+            const fileList = document.getElementById('file-list');
+            const backButton = document.getElementById('back-button');
+            const forwardButton = document.getElementById('forward-button');
+            
+            // Update the path box with the current path
+            const pathBox = document.getElementById('path-box');
+            pathBox.value = `${uidPath}${currentPath}`;
+
+            // Handle back/forward button states
+            if (historyIndex > 0) backButton.classList.remove('disabled');
+            else backButton.classList.add('disabled');
+
+            if (historyIndex < history.length - 1) forwardButton.classList.remove('disabled');
+            else forwardButton.classList.add('disabled');
+            
+            fileList.innerHTML = ''; // Clear file list
+
+            const parts = path.split('/');
+            let currentLevel = directoryStructure;
+
+            // Traverse the structure based on the path
+            parts.forEach(part => {
+                if (part) {
+                    currentLevel = currentLevel[part];
+                }
+            });
+
+            // Render files and folders
+            for (const name in currentLevel) {
+                const item = currentLevel[name];
+                const li = document.createElement('li');
+                li.classList.add(item === null ? 'file' : 'folder');
+                li.textContent = name;
+                li.onclick = function() {
+                    if (item === null) return; // Don't do anything if it's a file
+                    currentPath += `/${name}`;
+                    addToHistory(currentPath);
+                    renderDirectory(currentPath);
+                };
+                fileList.appendChild(li);
+            }
+        }
+
+        function addToHistory(path) {
+            if (historyIndex < history.length - 1) {
+                history = history.slice(0, historyIndex + 1);
+            }
+            history.push(path);
+            historyIndex++;
+        }
+
+        function goBack() {
+            if (historyIndex > 0) {
+                historyIndex--;
+                currentPath = history[historyIndex];
+                renderDirectory(currentPath);
+            }
+        }
+
+        function goForward() {
+            if (historyIndex < history.length - 1) {
+                historyIndex++;
+                currentPath = history[historyIndex];
+                renderDirectory(currentPath);
+            }
+        }
+
+        function updatePathFromUID() {
+            const uid = document.getElementById('uid-box').value;
+            if (uid) {
+                // Set the path to "file:///home/chronos/UID" and clear the current path
+                uidPath = `file:///home/chronos/${uid}`; 
+                saveSetting('uidPath', uidPath); // Save UID to cookie
+                currentPath = ''; // Reset the current path
+                renderDirectory('');
+            }
+        }
+
+        function toggleSettingsPanel() {
+            const settingsPanel = document.getElementById('settings-panel');
+            if (settingsPanel.style.display === 'block') {
+                settingsPanel.style.display = 'none';
+            } else {
+                settingsPanel.style.display = 'block';
+            }
+        }
+
+        function refreshView() {
+            renderDirectory(currentPath); // Refresh the current view
+        }
+
+        function searchDirectory() {
+            const query = document.getElementById('search-box').value.toLowerCase();
+            const items = document.getElementsByClassName('folder');
+
+            Array.from(items).forEach(item => {
+                const name = item.textContent.toLowerCase();
+                item.style.display = name.includes(query) ? '' : 'none';
+            });
+        }
+
+        // Load settings from cookies when the page is loaded
+        window.onload = function() {
+            const savedUID = readSetting('uidPath');
+            if (savedUID) {
+                uidPath = savedUID;
+                document.getElementById('uid-box').value = uidPath.split('/').pop(); // Display UID in the box
+                renderDirectory('');
+            }
+        };
+
+        // Add a listener for the keyboard shortcut CTRL + ALT + SHIFT + S
+        document.addEventListener('keydown', function(event) {
+            if (event.ctrlKey && event.altKey && event.shiftKey && event.key === 'S') {
+                toggleSettingsPanel();
+            }
+        });
+    </script>
+</body>
+</html>
