@@ -151,16 +151,41 @@
         let historyIndex = -1; // Tracks the current position in history
         let uidPath = ''; // Holds the UID path prefix
 
-        // Save settings to cookies
+        // Save settings to cookie
         function saveSetting(name, value) {
-            document.cookie = `${name}=${value};path=/;max-age=31536000`; // Save for 1 year
+            const expires = new Date();
+            expires.setFullYear(expires.getFullYear() + 1); // Cookie lasts for 1 year
+            document.cookie = `${name}=${value}; expires=${expires.toUTCString()}; path=/`;
         }
 
-        // Retrieve settings from cookies
+        // Read settings from cookie
         function readSetting(name) {
-            const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
-            return match ? match[2] : null;
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.startsWith(name + '=')) {
+                    return cookie.substring(name.length + 1);
+                }
+            }
+            return null;
         }
+
+        // Load saved UID and current path
+        window.onload = function() {
+            const savedUID = readSetting('uidPath');
+            if (savedUID) {
+                uidPath = savedUID;
+                document.getElementById('uid-box').value = uidPath.split('/').pop(); // Display UID in the box
+            }
+
+            const savedPath = readSetting('currentPath');
+            if (savedPath !== null) {
+                currentPath = savedPath;
+            } else {
+                currentPath = ''; // Default to the root if no path is saved
+            }
+            renderDirectory(currentPath); // Render the saved folder
+        };
 
         function selectFolder(uploadId) {
             const inputElement = document.getElementById(uploadId);
@@ -198,6 +223,7 @@
 
             currentPath = ''; // Start at the root
             addToHistory('');
+            saveSetting('currentPath', currentPath); // Save current path to cookie
             renderDirectory('');
         }
 
@@ -239,6 +265,7 @@
                     if (item === null) return; // Don't do anything if it's a file
                     currentPath += `/${name}`;
                     addToHistory(currentPath);
+                    saveSetting('currentPath', currentPath); // Save current path to cookie
                     renderDirectory(currentPath);
                 };
                 fileList.appendChild(li);
@@ -251,6 +278,7 @@
             }
             history.push(path);
             historyIndex++;
+            saveSetting('currentPath', path); // Save the current path to cookies
         }
 
         function goBack() {
@@ -269,56 +297,29 @@
             }
         }
 
-        function updatePathFromUID() {
-            const uid = document.getElementById('uid-box').value;
-            if (uid) {
-                // Set the path to "file:///home/chronos/UID" and clear the current path
-                uidPath = `file:///home/chronos/${uid}`; 
-                saveSetting('uidPath', uidPath); // Save UID to cookie
-                currentPath = ''; // Reset the current path
-                renderDirectory('');
+        function searchDirectory() {
+            const searchValue = document.getElementById('search-box').value.toLowerCase();
+            const fileList = document.getElementById('file-list');
+            const allItems = fileList.getElementsByTagName('li');
+
+            for (let i = 0; i < allItems.length; i++) {
+                const item = allItems[i];
+                if (item.textContent.toLowerCase().includes(searchValue)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
             }
         }
 
-        function toggleSettingsPanel() {
-            const settingsPanel = document.getElementById('settings-panel');
-            if (settingsPanel.style.display === 'block') {
-                settingsPanel.style.display = 'none';
-            } else {
-                settingsPanel.style.display = 'block';
-            }
+        function updatePathFromUID() {
+            uidPath = document.getElementById('uid-box').value;
+            saveSetting('uidPath', uidPath); // Save UID to cookies
         }
 
         function refreshView() {
-            renderDirectory(currentPath); // Refresh the current view
+            renderDirectory(currentPath);
         }
-
-        function searchDirectory() {
-            const query = document.getElementById('search-box').value.toLowerCase();
-            const items = document.getElementsByClassName('folder');
-
-            Array.from(items).forEach(item => {
-                const name = item.textContent.toLowerCase();
-                item.style.display = name.includes(query) ? '' : 'none';
-            });
-        }
-
-        // Load settings from cookies when the page is loaded
-        window.onload = function() {
-            const savedUID = readSetting('uidPath');
-            if (savedUID) {
-                uidPath = savedUID;
-                document.getElementById('uid-box').value = uidPath.split('/').pop(); // Display UID in the box
-                renderDirectory('');
-            }
-        };
-
-        // Add a listener for the keyboard shortcut CTRL + ALT + SHIFT + S
-        document.addEventListener('keydown', function(event) {
-            if (event.ctrlKey && event.altKey && event.shiftKey && event.key === 'S') {
-                toggleSettingsPanel();
-            }
-        });
     </script>
 </body>
 </html>
